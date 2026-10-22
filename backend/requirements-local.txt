@@ -1,0 +1,11 @@
+# One computer: no Docker, PostgreSQL, Redis server, Celery worker, or cloud account.
+fastapi==0.161.1
+starlette==1.9.0
+uvicorn==0.38.0
+SQLAlchemy==2.0.44
+pydantic-settings==2.11.0
+PyJWT[crypto]==2.15.1
+httpx==0.28.1
+python-multipart==0.0.32
+redis==5.2.1
+prometheus-client==0.23.1

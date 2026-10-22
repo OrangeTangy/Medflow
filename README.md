@@ -2,9 +2,13 @@
 
 A full-stack hospital workforce application: Next.js/React/TypeScript, Tailwind, shadcn-style Radix components, Recharts, FastAPI, SQLAlchemy/Alembic, PostgreSQL RLS, Redis, and Celery. Doctor and administrator permissions are enforced in the API and PostgreSQL.
 
-**Two explicitly separate runtimes are included.** The private Sites deployment is a persistent, fictional integration sandbox, backed by D1 and an authenticated-owner namespace. Its administrator/doctor selector previews workflows. It cannot connect to hospital equipment or process real employee/health data. The production runtime is the Python/PostgreSQL stack under `backend/`; it has no sandbox role-switch endpoint, seeded accounts, or password fallback.
+**Three separate runtimes are included.** Single-computer mode saves real manual attendance and activity reports in SQLite using local accounts. The private Sites deployment is a persistent, fictional integration sandbox, backed by D1 and an authenticated-owner namespace; its administrator/doctor selector previews workflows. The enterprise runtime is the Python/PostgreSQL stack under `backend/`; it has no local password endpoints, sandbox role switch, or seeded accounts.
 
 This is an implementation and deployment foundation, not a certification of production readiness or HIPAA compliance. Live SSO/MFA, equipment-specific integration validation, provider agreements, load/security testing, and organizational policy review remain deployment prerequisites. See [release acceptance](docs/ACCEPTANCE.md).
+
+## Use it on a simple computer now
+
+Run `python scripts/run_local.py` (Windows: `py scripts/run_local.py`) and open **http://127.0.0.1:8000/local**. This standalone mode saves real arrival/departure timestamps, calculates duration, and stores activity reports in `data/medflow.sqlite3`. It needs Python only; the core page works without Node, Docker, Redis, a database server, or cloud configuration. First-run setup creates separate local admin and doctor accounts. Records persist across restarts. See the [single-computer guide](docs/LOCAL.md) for API examples and backups.
 
 ## Included behavior
 

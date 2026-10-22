@@ -14,3 +14,7 @@ outputs/
 .sites-runtime/
 *.tsbuildinfo
 worker/assets.mjs
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

@@ -127,6 +127,7 @@ type Correction = {
 };
 type Data = {
   mode: string;
+  organization_name?: string;
   role: string;
   user: { id: string; full_name: string; email: string; department: string };
   doctors: Doctor[];
@@ -220,7 +221,9 @@ function Badge({ status }: { status: string }) {
         "badge " +
         (status === "Present" || status === "approved" || status === "reviewed"
           ? "badge-green"
-          : status === "Last seen" || status === "pending"
+          : status === "Last seen" ||
+              status === "pending" ||
+              status === "Manual check-in"
             ? "badge-amber"
             : "badge-gray")
       }
@@ -735,7 +738,7 @@ export default function App() {
             <Building2 size={18} />
           </span>
           <span>
-            <strong>St. Catherine Medical</strong>
+            <strong>{data.organization_name || "St. Catherine Medical"}</strong>
             <small>Hospital workspace</small>
           </span>
           <ChevronDown size={14} />
@@ -926,6 +929,17 @@ export default function App() {
               </button>
             </div>
           )}
+          {data.mode === "local" && (
+            <div className="sandbox-line">
+              <span>
+                <span className="sandbox-dot" />
+                This computer · SQLite database · Manual attendance
+              </span>
+              <a className="text-link" href="/local">
+                Record arrival / departure <ArrowRight size={13} />
+              </a>
+            </div>
+          )}
           {page === "Overview" && !selected && (
             <>
               <div className="stats-grid">
@@ -935,12 +949,15 @@ export default function App() {
                         label: "Registered doctors",
                         value: data.metrics.total.toString(),
                         icon: Users,
-                        change: "Across 6 departments",
+                        change: `Across ${new Set(data.doctors.map((d) => d.department)).size} departments`,
                         tag: "Your team",
                         tone: "blue",
                       },
                       {
-                        label: "Currently on site",
+                        label:
+                          data.mode === "local"
+                            ? "Manually checked in"
+                            : "Currently on site",
                         value: data.metrics.present.toString(),
                         icon: Wifi,
                         change: `${Math.round((data.metrics.present / Math.max(1, data.metrics.total)) * 100)}% of registered doctors`,
@@ -948,13 +965,19 @@ export default function App() {
                         tone: "green",
                       },
                       {
-                        label: "Detected hours today",
+                        label:
+                          data.mode === "local"
+                            ? "Recorded hours today"
+                            : "Detected hours today",
                         value: data.metrics.hours.toLocaleString("en-US", {
                           maximumFractionDigits: 1,
                         }),
                         suffix: "hrs",
                         icon: Clock3,
-                        change: "From authenticated network events",
+                        change:
+                          data.mode === "local"
+                            ? "From saved manual timestamps"
+                            : "From authenticated network events",
                         tag: "Today",
                         tone: "purple",
                       },
@@ -2402,9 +2425,11 @@ export default function App() {
               e.preventDefault();
               const f = new FormData(e.currentTarget);
               mutate(
-                "/users",
+                data.mode === "local" ? "/local/accounts" : "/users",
                 Object.fromEntries(f),
-                "Doctor account created. Enroll their enterprise identity before tracking.",
+                data.mode === "local"
+                  ? "Local doctor account created. They can now sign in."
+                  : "Doctor account created. Enroll their enterprise identity before tracking.",
               );
             }}
           >
@@ -2442,10 +2467,19 @@ export default function App() {
               </select>
             </label>
             <label>
-              OIDC subject / enterprise identity
+              {data.mode === "local"
+                ? "Local account password"
+                : "OIDC subject / enterprise identity"}
               <input
-                name="identity_reference"
-                placeholder="Unique identity from approved provider"
+                name={data.mode === "local" ? "password" : "identity_reference"}
+                type={data.mode === "local" ? "password" : "text"}
+                minLength={data.mode === "local" ? 10 : 1}
+                autoComplete={data.mode === "local" ? "new-password" : "off"}
+                placeholder={
+                  data.mode === "local"
+                    ? "At least 10 characters"
+                    : "Unique identity from approved provider"
+                }
                 required
                 maxLength={200}
               />
