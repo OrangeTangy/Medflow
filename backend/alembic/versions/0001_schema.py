@@ -1,11 +1,12 @@
 """Initial normalized schema, tenant RLS, and overlap protection."""
 from alembic import op
-from app.models import Base
+from pathlib import Path
 revision='0001'
 down_revision=None
 
 def upgrade():
-    Base.metadata.create_all(op.get_bind())
+    for statement in Path(__file__).with_name('0001_tables.sql').read_text().split(';'):
+        if statement.strip():op.execute(statement)
     op.execute('CREATE EXTENSION IF NOT EXISTS btree_gist')
     op.execute("ALTER TABLE attendance_sessions ADD CONSTRAINT no_overlapping_attendance EXCLUDE USING gist (organization_id WITH =, doctor_id WITH =, tstzrange(started_at, ended_at, '[)') WITH &&) DEFERRABLE INITIALLY DEFERRED")
     org="organization_id = current_setting('app.organization_id',true)"

@@ -42,7 +42,8 @@ def rebuild(db,org,doctor_id,as_of=None):
             db.add(AttendanceSession(organization_id=org,doctor_id=doctor_id,location_id=unknown.id if p.location_id=='unknown' else p.location_id,started_at=a,ended_at=None if p.ongoing and b==as_of else b,duration_seconds=int((b-a).total_seconds()),confidence_status=p.confidence,session_status='open' if p.ongoing and b==as_of else 'closed',source='network'))
 
 def dashboard(db,p,date=None,period='This week'):
-    as_of=now();tz=ZoneInfo('America/New_York')
+    org=db.scalar(select(Organization).where(Organization.id==p.organization_id))
+    as_of=now();tz=ZoneInfo(org.settings.get('reporting_timezone','UTC'))
     selected=date or as_of.astimezone(tz).date()
     start=datetime.combine(selected,time.min,tz).astimezone(timezone.utc);end=datetime.combine(selected+timedelta(days=1),time.min,tz).astimezone(timezone.utc)
     users=db.scalars(scope(User,p).where(User.role=='doctor')).all()

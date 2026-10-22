@@ -179,11 +179,12 @@ const colors = ["#188e82", "#5689aa", "#bccdd6", "#b4dad4"];
 const dateLabel = (
   s: string | null,
   opts: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" },
+  timezone: string = "America/New_York",
 ) =>
   s
     ? new Intl.DateTimeFormat("en-US", {
         ...opts,
-        timeZone: "America/New_York",
+        timeZone: timezone,
       }).format(new Date(s))
     : "—";
 const hours = (n: number) => {
@@ -628,8 +629,21 @@ export default function App() {
                 }
               />
               <div className="timeline-time">
-                {dateLabel(s.started_at)}
-                <span>{s.ended_at ? dateLabel(s.ended_at) : "Ongoing"}</span>
+                {dateLabel(
+                  s.started_at,
+                  undefined,
+                  data?.locations.find((l) => l.id === s.location_id)?.timezone,
+                )}
+                <span>
+                  {s.ended_at
+                    ? dateLabel(
+                        s.ended_at,
+                        undefined,
+                        data?.locations.find((l) => l.id === s.location_id)
+                          ?.timezone,
+                      )
+                    : "Ongoing"}
+                </span>
               </div>
               <div className="timeline-description">
                 <strong>{s.location}</strong>
@@ -1558,7 +1572,7 @@ export default function App() {
                             .map((s) => (
                               <span
                                 key={s.id}
-                                title={`${s.location}: ${dateLabel(s.started_at)} – ${dateLabel(s.ended_at)}`}
+                                title={`${s.location}: ${dateLabel(s.started_at, undefined, data?.locations.find((l) => l.id === s.location_id)?.timezone)} – ${dateLabel(s.ended_at)}`}
                                 style={{
                                   left: `${Math.max(0, ((new Date(s.started_at).getUTCHours() + new Date(s.started_at).getUTCMinutes() / 60 - 10) / 14) * 100)}%`,
                                   width: `${Math.max(1, (s.duration_seconds / 3600 / 14) * 100)}%`,
@@ -2567,7 +2581,13 @@ export default function App() {
                 <option value="">Missing session</option>
                 {data.sessions.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.location} · {dateLabel(s.started_at)}
+                    {s.location} ·{" "}
+                    {dateLabel(
+                      s.started_at,
+                      undefined,
+                      data?.locations.find((l) => l.id === s.location_id)
+                        ?.timezone,
+                    )}
                   </option>
                 ))}
               </select>

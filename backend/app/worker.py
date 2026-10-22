@@ -23,7 +23,7 @@ def dispatch():
         with WorkerDB() as db:
             job=db.scalar(select(ProcessingJob).where(ProcessingJob.status.in_(['queued','retry']),ProcessingJob.attempts<5).order_by(ProcessingJob.created_at).with_for_update(skip_locked=True).limit(1))
             if not job:break
-            job.attempts+=1;job.status='processing';org=job.organization_id;doctor=job.doctor_id
+            job.attempts+=1;job.status='processing';org=job.organization_id;doctor=job.doctor_id;cleanup_recording=None
             try:
                 with db.begin_nested():
                     tenant_context(db,org,'','processor')
@@ -38,13 +38,20 @@ def dispatch():
                             transcript=response.json()['text']
                         if not isinstance(transcript,str) or len(transcript)>100000:raise RuntimeError('Invalid provider response')
                         job.result={'transcript':transcript}
-                        if s.audio_retention_days==0:
-                            boto3.client('s3').delete_object(Bucket=s.audio_bucket,Key=recording.storage_reference);db.delete(recording)
+                        if s.audio_retention_days==0:cleanup_recording=(recording.id,recording.storage_reference)
                     job.status='completed';job.error=None
             except Exception:
                 job.status='failed' if job.attempts>=5 else 'retry'
                 job.error='Processing failed. Contact your administrator with the job ID.'
             db.commit()
+        # Commit the transcript before deleting its only source recording.
+        # If cleanup fails, retention maintenance retries the remaining row.
+        if cleanup_recording and job.status=='completed':
+            try:
+                boto3.client('s3').delete_object(Bucket=s.audio_bucket,Key=cleanup_recording[1])
+                with WorkerDB() as cleanup_db:
+                    cleanup_db.execute(delete(AudioRecording).where(AudioRecording.id==cleanup_recording[0]));cleanup_db.commit()
+            except Exception:pass
         try:
             redis=Redis.from_url(s.redis_url)
             message=json.dumps({'type':'presence_updated' if job.kind=='reconcile' else 'transcription_updated','job_id':job.id})
