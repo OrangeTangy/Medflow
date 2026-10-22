@@ -1,0 +1,42 @@
+name: Deploy reviewed release to ECS
+on:
+  workflow_dispatch:
+    inputs:
+      ref: {description: 'Reviewed commit SHA with passing CI', required: true}
+permissions: {contents: read, id-token: write}
+concurrency: {group: medflow-production, cancel-in-progress: false}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ inputs.ref }}'}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+      - name: Build immutable release images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          RELEASE_SHA: ${{ inputs.ref }}
+        run: |
+          docker build -t "$REGISTRY/medflow-api:$RELEASE_SHA" backend
+          docker build -t "$REGISTRY/medflow-web:$RELEASE_SHA" .
+          docker push "$REGISTRY/medflow-api:$RELEASE_SHA"
+          docker push "$REGISTRY/medflow-web:$RELEASE_SHA"
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install boto3
+      - name: Migrate and promote ECS services
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          RELEASE_SHA: ${{ inputs.ref }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_WEB_SERVICE: ${{ vars.ECS_WEB_SERVICE }}
+          ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE }}
+          ECS_SCHEDULER_SERVICE: ${{ vars.ECS_SCHEDULER_SERVICE }}
+          MIGRATION_DATABASE_SECRET_ARN: ${{ vars.MIGRATION_DATABASE_SECRET_ARN }}
+        run: python scripts/deploy-ecs.py

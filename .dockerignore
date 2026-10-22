@@ -1,0 +1,10 @@
+node_modules
+.next
+.venv
+.git
+.env*
+outputs
+dist
+out
+worker/assets.mjs
+__pycache__

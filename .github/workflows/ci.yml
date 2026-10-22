@@ -1,0 +1,32 @@
+name: Validate Medflow
+on: [push, pull_request]
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: {POSTGRES_PASSWORD: test-password, POSTGRES_DB: medflow}
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:test-password@localhost:5432/medflow
+      TEST_POSTGRES_URL: postgresql+psycopg://postgres:test-password@localhost:5432/medflow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: npm ci
+      - run: pip install -r backend/requirements.txt
+      - run: alembic upgrade head
+        working-directory: backend
+      - run: pytest -q
+      - run: npm run test:edge
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+      - run: pip install pip-audit && pip-audit -r backend/requirements.txt
+      - uses: actions/upload-artifact@v4
+        with: {name: frontend, path: out/}

@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: medflow
+      POSTGRES_USER: migration_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong migration owner password}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U migration_owner -d medflow']
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+  api:
+    build: ./backend
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 20s
+      retries: 3
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+  worker:
+    build: ./backend
+    command: [celery, -A, app.worker.celery, worker, --loglevel=INFO, --concurrency=4]
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+  scheduler:
+    build: ./backend
+    command: [celery, -A, app.worker.celery, beat, --loglevel=INFO, --schedule=/tmp/celerybeat-schedule]
+    env_file: .env
+    depends_on: [worker]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+  web:
+    build: .
+    ports: ['127.0.0.1:8080:8080']
+    depends_on: [api]
+    restart: unless-stopped
+volumes:
+  pgdata:
+  redisdata:
