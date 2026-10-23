@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from .models import Base, Organization, Department, User, Location, WifiNetwork, AuthSession, AttendanceSession, AuditLog, now, uid
-from .local_models import LocalBase, LocalCredential, LocalTimestamp
+from .local_models import LocalBase, LocalCredential, LocalTimestamp, LocalWifiEvent
 from .security import Principal, principal, database, guard_mutation, token_hash
 from .services import audit, dashboard, get_record, json_row, scope
 
@@ -85,6 +85,41 @@ class TimestampInput(Strict):
         if value is not None and value.tzinfo is None:
             raise ValueError('Timestamp must include a timezone offset')
         return value.astimezone(timezone.utc) if value else value
+
+
+from typing import Literal
+from uuid import UUID
+
+
+class WifiObservation(Strict):
+    id: UUID
+    run_id: UUID
+    device_id: UUID
+    observed_at: datetime
+    event_type: Literal['connected', 'disconnected', 'network_changed', 'probe_error', 'probe_recovered', 'watcher_started', 'watcher_stopped', 'monitor_gap']
+    source: Literal['local_wifi_test', 'android_macrodroid_test'] = 'local_wifi_test'
+    interface: str | None = Field(default=None, max_length=256)
+    ssid: str | None = Field(default=None, max_length=256)
+    previous_ssid: str | None = Field(default=None, max_length=256)
+    initial_observation: bool | None = None
+    note: str | None = Field(default=None, max_length=1000)
+    diagnostic: str | None = Field(default=None, max_length=1000)
+    polling_seconds: float | None = Field(default=None, ge=0.5, le=60)
+    unobserved_seconds: float | None = Field(default=None, ge=0)
+
+    @field_validator('observed_at')
+    @classmethod
+    def observed_time(cls, value):
+        if value.tzinfo is None:
+            raise ValueError('Observation time must include a timezone offset')
+        if value > now()+timedelta(seconds=60) or value < now()-timedelta(days=30):
+            raise ValueError('Observation time is outside the accepted 30-day window')
+        return value.astimezone(timezone.utc)
+
+
+class AndroidWifiImport(Strict):
+    content: str = Field(min_length=1, max_length=512000)
+    device_id: UUID
 
 
 def password_hash(password, salt):
@@ -355,6 +390,53 @@ def create_local_app(db_path=None, origin=None, frontend_directory=None):
         locations = {l.id: l.name for l in db.scalars(scope(Location, p))}
         audit(db, p, 'read', 'timestamps')
         return [{**timestamp_data(row, db.get(AttendanceSession, row.session_id)), 'doctor_name': users.get(row.doctor_id), 'location': locations.get(row.location_id)} for row in db.scalars(q.order_by(LocalTimestamp.event_timestamp.desc()).limit(500))]
+
+    @app.post('/api/local/wifi-events', status_code=201)
+    def wifi_event(body: WifiObservation, p=Depends(local_principal), db=Depends(local_database)):
+        if p.role != 'doctor':
+            raise HTTPException(403, 'Use the local doctor account associated with this computer test')
+        payload = body.model_dump(mode='json', exclude_none=True)
+        existing = db.get(LocalWifiEvent, str(body.id))
+        if existing:
+            if existing.organization_id != p.organization_id or existing.doctor_id != p.id or existing.payload != payload:
+                raise HTTPException(409, 'Event ID is already used for another observation')
+            return {'id': existing.id, 'duplicate': True, 'source': 'device_reported_test'}
+        row = LocalWifiEvent(id=str(body.id), organization_id=p.organization_id, doctor_id=p.id, device_id=str(body.device_id), run_id=str(body.run_id), event_type=body.event_type, observed_at=body.observed_at, payload=payload)
+        db.add(row)
+        audit(db, p, 'record_wifi_observation', 'wifi_test_event', row.id)
+        db.commit()
+        return {'id': row.id, 'duplicate': False, 'source': 'device_reported_test'}
+
+    @app.get('/api/local/wifi-events')
+    def wifi_events(p=Depends(local_principal), db=Depends(local_database)):
+        q = scope(LocalWifiEvent, p).order_by(LocalWifiEvent.observed_at.desc()).limit(100)
+        audit(db, p, 'read', 'wifi_test_events')
+        return [{**row.payload, 'received_at': row.received_at, 'evidence': 'device_reported_test'} for row in db.scalars(q)]
+
+    @app.post('/api/local/wifi-events/import')
+    def import_android_wifi(body: AndroidWifiImport, p=Depends(local_principal), db=Depends(local_database)):
+        if p.role != 'doctor':
+            raise HTTPException(403, 'Import phone observations while signed in to your own doctor account')
+        from .android_wifi import parse_android_log
+        from pydantic import ValidationError
+        try:
+            rows = [WifiObservation.model_validate(row) for row in parse_android_log(body.content, str(body.device_id), p.organization_id+':'+p.id)]
+        except (ValueError, ValidationError, OverflowError):
+            raise HTTPException(422, 'The log has missing/invalid Medflow markers or timestamps outside the last 30 days. Use expanded System time (ms) values.')
+        inserted, duplicates = 0, 0
+        for row in rows:
+            payload = row.model_dump(mode='json', exclude_none=True)
+            existing = db.get(LocalWifiEvent, str(row.id))
+            if existing:
+                if existing.organization_id != p.organization_id or existing.doctor_id != p.id or existing.payload != payload:
+                    raise HTTPException(409, 'Observation ID conflicts with another record')
+                duplicates += 1
+                continue
+            db.add(LocalWifiEvent(id=str(row.id), organization_id=p.organization_id, doctor_id=p.id, device_id=str(row.device_id), run_id=str(row.run_id), event_type=row.event_type, observed_at=row.observed_at, payload=payload))
+            inserted += 1
+        audit(db, p, 'import_android_wifi', 'wifi_test_events', details={'inserted': inserted, 'duplicates': duplicates})
+        db.commit()
+        return {'inserted': inserted, 'duplicates': duplicates, 'source': 'device_reported_test', 'attendance_modified': False}
 
     from .schemas import CheckinInput
 
