@@ -25,4 +25,5 @@ pairing*.json
 *.keystore
 *.jks
 *.apk
+!downloads/medflow-wifi-android-test.apk
 *.pem

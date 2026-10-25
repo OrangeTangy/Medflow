@@ -34,7 +34,7 @@ Find the main computer's WiFi/LAN address in its network settings (macOS: WiFi D
 
 ## 3A. Android phone (Android 8+)
 
-Download the test APK from [GitHub Releases](https://github.com/OrangeTangy/Medflow/releases), or build it as described below. Android may require you to allow installation from your browser/file manager. This is a self-signed test build, not a Play Store release or hospital deployment approval.
+Download [the Android test APK](https://github.com/OrangeTangy/Medflow/raw/refs/heads/main/downloads/medflow-wifi-android-test.apk), or build it as described below. Android may require you to allow installation from your browser/file manager. This is a self-signed test build, not a Play Store release or hospital deployment approval.
 
 1. Install and open **Medflow WiFi**.
 2. Paste the pairing JSON and tap **Save pairing**.
