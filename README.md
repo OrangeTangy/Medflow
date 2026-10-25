@@ -8,6 +8,8 @@ This is an implementation and deployment foundation, not a certification of prod
 
 ## Use it on a simple computer now
 
+**WiFi notifications quick start:** [Choose your WiFi, pair an Android phone/computer, and notify the main computer](docs/WIFI-QUICKSTART.md). Run `python scripts/run_local.py --receive-devices --insecure-lan` for a private LAN test, create a pairing in `/local`, and install the Android test APK from [Releases](https://github.com/OrangeTangy/Medflow/releases) or use `scripts/watch_wifi.py --pairing pairing.json`. No WiFi password is needed. Offline events queue until the receiver is reachable. This is device-reported connectivity, separate from verified hospital attendance.
+
 Run `python scripts/run_local.py` (Windows: `py scripts/run_local.py`) and open **http://127.0.0.1:8000/local**. This standalone mode saves real arrival/departure timestamps, calculates duration, and stores activity reports in `data/medflow.sqlite3`. It needs Python only; the core page works without Node, Docker, Redis, a database server, or cloud configuration. First-run setup creates separate local admin and doctor accounts. Records persist across restarts. See the [single-computer guide](docs/LOCAL.md) for API examples and backups.
 
 **On an Android phone now:** follow the [Android WiFi test](docs/ANDROID-WIFI-TEST.md) to log connection/disconnection timestamps on the phone using MacroDroid, including while offline. The local page can import those logs later. They are unverified device observations and remain separate from attendance sessions.

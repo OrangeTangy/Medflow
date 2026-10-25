@@ -1,5 +1,7 @@
 # Test WiFi connect/disconnect on your Android phone now
 
+**Medflow now includes its own Android app and paired live notifications.** For that complete flow, follow [WiFi quick start](WIFI-QUICKSTART.md) and download the test APK from [Releases](https://github.com/OrangeTangy/Medflow/releases). The MacroDroid steps below remain an optional phone-only logging/import alternative when no main computer is running.
+
 The test must run on the phone. The web dashboard and the cloud build workspace cannot observe your phone’s WiFi association. You do not need a Mac, Python, or a server for this first test.
 
 ## 1. Install the automation app

@@ -233,6 +233,9 @@ def create_local_app(db_path=None, origin=None, frontend_directory=None):
     app.dependency_overrides[database] = local_database
     app.dependency_overrides[guard_mutation] = local_guard
 
+    from .wifi_pairing import register_pairing_routes
+    register_pairing_routes(app, local_principal, local_database)
+
     @app.get('/api/local/status')
     def status():
         with LocalDB() as db:

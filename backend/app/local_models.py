@@ -46,3 +46,31 @@ class LocalWifiEvent(LocalBase):
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime())
     received_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=now)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class LocalPairedDevice(LocalBase):
+    __tablename__ = 'local_paired_devices'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey(Organization.__table__.c.id), index=True)
+    doctor_id: Mapped[str] = mapped_column(ForeignKey(User.__table__.c.id), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    target_ssid: Mapped[str] = mapped_column(String(128))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=now)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_received_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_state: Mapped[str] = mapped_column(String(32), default='unknown')
+
+
+class LocalNotification(LocalBase):
+    __tablename__ = 'local_notifications'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey(Organization.__table__.c.id), index=True)
+    doctor_id: Mapped[str] = mapped_column(ForeignKey(User.__table__.c.id), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey(LocalPairedDevice.id))
+    event_id: Mapped[str] = mapped_column(ForeignKey(LocalWifiEvent.id), unique=True)
+    title: Mapped[str] = mapped_column(String(160))
+    message: Mapped[str] = mapped_column(String(600))
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=now)

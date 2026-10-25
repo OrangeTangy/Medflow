@@ -43,6 +43,8 @@ class EventLog:
                 synced INTEGER NOT NULL DEFAULT 0
             );
         ''')
+        if 'sync_error' not in {row[1] for row in self.connection.execute('PRAGMA table_info(wifi_events)')}:
+            self.connection.execute('ALTER TABLE wifi_events ADD COLUMN sync_error TEXT')
         self.connection.execute('INSERT OR IGNORE INTO wifi_settings (key,value) VALUES (?,?)', ('device_id', str(uuid.uuid4())))
         self.connection.commit()
         self.device_id = self.connection.execute('SELECT value FROM wifi_settings WHERE key=?', ('device_id',)).fetchone()[0]
@@ -69,16 +71,21 @@ class EventLog:
         self.connection.execute('UPDATE wifi_events SET synced=1 WHERE id=?', (event_id,))
         self.connection.commit()
 
+    def rejected(self, event_id, reason):
+        self.connection.execute('UPDATE wifi_events SET synced=2,sync_error=? WHERE id=?', (reason, event_id))
+        self.connection.commit()
+
     def close(self):
         self.connection.close()
 
 
 class Tracker:
-    def __init__(self, log, actor_id=None):
+    def __init__(self, log, actor_id=None, target_ssid=None):
         self.log, self.actor_id = log, actor_id
         self.run_id = str(uuid.uuid4())
         self.previous = None
         self.error = None
+        self.target_ssid = target_ssid
 
     def emit(self, kind, **details):
         record = {'id': str(uuid.uuid4()), 'run_id': self.run_id, 'device_id': self.log.device_id, 'observed_at': utc_now(), 'event_type': kind, 'source': 'local_wifi_test', **details}
@@ -87,10 +94,13 @@ class Tracker:
         return record
 
     def update(self, snapshot):
+        if self.target_ssid and any(connection.ssid is None for connection in snapshot.connections):
+            self.probe_error(ProbeError('The OS has redacted the WiFi name. Target network state is unknown; no departure inferred.'))
+            return
         if self.error:
             self.emit('probe_recovered', note='WiFi observations are available again; the unobserved period remains unknown.')
             self.error = None
-        current = {connection.interface: connection.ssid for connection in snapshot.connections}
+        current = {connection.interface: connection.ssid for connection in snapshot.connections if not self.target_ssid or connection.ssid == self.target_ssid}
         if self.previous is None:
             if current:
                 for interface, ssid in current.items():
@@ -140,6 +150,64 @@ class SyncClient:
             log.synced(event_id)
 
 
+class PairedSyncClient:
+    """Send only WiFi observations using a narrowly scoped pairing token."""
+    def __init__(self, config_path):
+        self.config = json.loads(Path(config_path).read_text(encoding='utf-8'))
+        self.origin = self.config['receiver_url'].rstrip('/')
+        parts = urlsplit(self.origin)
+        import ipaddress
+        try:
+            address = ipaddress.ip_address(parts.hostname or '')
+            private = address.version == 4 and any(address in ipaddress.ip_network(cidr) for cidr in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8'))
+        except ValueError:
+            private = parts.hostname == 'localhost'
+        if parts.scheme not in ('https','http') or (parts.scheme == 'http' and not private) or not parts.hostname or parts.username or parts.password or parts.path or parts.query or parts.fragment:
+            raise ValueError('Pairing receiver must use HTTPS or private-LAN test HTTP')
+        self.actor_id = str(uuid.UUID(self.config['device_id']))
+        self.ssid = self.config['ssid']
+        if self.config.get('version') != 1 or not isinstance(self.ssid, str) or not 1 <= len(self.ssid.encode('utf-8')) <= 32:
+            raise ValueError('Invalid pairing version or SSID')
+        self.token = self.config['token']
+        import re
+        if not isinstance(self.token, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{40,100}', self.token):
+            raise ValueError('Invalid pairing token')
+        # A redirect must never forward the bearer capability to another host.
+        from urllib.request import HTTPRedirectHandler
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        self.client = build_opener(NoRedirect())
+
+    def flush(self, log):
+        kinds = {'connected':'connected', 'disconnected':'disconnected', 'probe_error':'unknown', 'probe_recovered':'unknown', 'watcher_started':'monitor_started', 'watcher_stopped':'monitor_stopped', 'monitor_gap':'unknown'}
+        for event_id, encoded in log.pending(self.actor_id):
+            row = json.loads(encoded)
+            kind = kinds.get(row['event_type'])
+            if kind is None:
+                log.synced(event_id)
+                continue
+            body = {'id': row['id'], 'event_type': kind, 'observed_at': row['observed_at'], 'initial_observation': row.get('initial_observation', False)}
+            if kind in ('connected','disconnected'):
+                body['ssid'] = self.ssid
+            note = row.get('note') or row.get('diagnostic')
+            if note:
+                body['note'] = note[:500]
+            request = Request(self.origin+'/api/events', data=json.dumps(body).encode(), headers={'Content-Type':'application/json', 'Authorization':'Bearer '+self.token})
+            try:
+                with self.client.open(request, timeout=4) as response:
+                    result = json.load(response)
+                    if result.get('id') != event_id:
+                        raise OSError('Receiver did not acknowledge the original event ID')
+            except HTTPError as exc:
+                if exc.code in (409, 422):
+                    log.rejected(event_id, 'Receiver rejected the event with HTTP '+str(exc.code))
+                    print('An observation was rejected and retained in SQLite for review (HTTP '+str(exc.code)+'). Later queued events will still be sent.', file=sys.stderr)
+                    continue
+                raise
+            log.synced(event_id)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Log WiFi connects/disconnects on this physical computer, including while offline.')
     parser.add_argument('--interval', type=float, default=2, help='Poll interval in seconds (default: 2)')
@@ -147,18 +215,30 @@ def main():
     parser.add_argument('--sync', action='store_true', help='Also send the observations to your authenticated local doctor account')
     parser.add_argument('--server', default='http://127.0.0.1:8000')
     parser.add_argument('--once', action='store_true', help='Read/log the current WiFi state once, then exit')
+    parser.add_argument('--ssid', help='Monitor only this exact WiFi name; no WiFi password needed')
+    parser.add_argument('--pairing', type=Path, help='Private pairing.json downloaded from the main computer; enables remote notification delivery')
     args = parser.parse_args()
     if not 0.5 <= args.interval <= 60:
         parser.error('Choose a polling interval between 0.5 and 60 seconds')
     sync = None
-    if args.sync:
+    if args.sync and args.pairing:
+        parser.error('Choose --sync for the same-computer app or --pairing for a main-computer receiver')
+    if args.pairing:
+        try:
+            sync = PairedSyncClient(args.pairing)
+            if args.ssid and args.ssid != sync.ssid:
+                parser.error('--ssid does not match the WiFi name in the pairing')
+            args.ssid = sync.ssid
+        except (ValueError, KeyError, OSError) as exc:
+            parser.error('Cannot load pairing: '+str(exc))
+    elif args.sync:
         try:
             sync = SyncClient(args.server)
         except (ValueError, HTTPError, URLError, OSError) as exc:
             print(f'Unable to sign in to the local app: {exc}. Start the app and use a doctor account, or omit --sync for local-only logs.', file=sys.stderr)
             return 1
     log = EventLog(args.log_dir)
-    tracker = Tracker(log, sync.actor_id if sync else None)
+    tracker = Tracker(log, sync.actor_id if sync else None, target_ssid=args.ssid)
     print(f'WiFi test log: {log.path}\nReadable log: {log.directory / "wifi-events.jsonl"}\nToggle WiFi off/on on THIS computer. Ctrl+C stops the watcher.\nDevice observations are not verified staff attendance.', file=sys.stderr, flush=True)
     tracker.emit('watcher_started', polling_seconds=args.interval)
     stopping = False
