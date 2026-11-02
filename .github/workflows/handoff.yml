@@ -1,0 +1,30 @@
+name: Verify clean local setup
+on: [push, pull_request, workflow_dispatch]
+permissions: {contents: read}
+jobs:
+  local-handoff:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: Medflow handoff
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: Medflow handoff
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create an isolated environment
+        run: python -m venv .venv
+      - name: Install only local requirements
+        run: python -c "import os, subprocess; p='.venv/Scripts/python.exe' if os.name=='nt' else '.venv/bin/python'; subprocess.check_call([p, '-m', 'pip', 'install', '-r', 'backend/requirements-local.txt'])"
+      - name: Check the launcher
+        run: python scripts/run_local.py --help
+      - name: Exercise the clean local user journey
+        run: python scripts/verify_local.py
+      - name: Check Python syntax
+        run: python -m compileall -q scripts backend/app

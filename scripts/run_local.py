@@ -23,6 +23,8 @@ def main():
     parser.add_argument('--tls-key', type=Path)
     parser.add_argument('--insecure-lan', action='store_true', help='Explicitly allow unencrypted receiver HTTP for a private LAN test')
     args = parser.parse_args()
+    if sys.version_info < (3, 12):
+        parser.error('Python 3.12 or newer is required. On Windows try py -3; on macOS/Linux try python3.')
     project = Path(__file__).resolve().parents[1]
     database = (args.database or project / 'data' / 'medflow.sqlite3').resolve()
     if args.backup:
